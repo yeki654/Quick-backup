@@ -29,6 +29,9 @@ QuickBackup is a lightweight **Termux** backup tool for Android that:
 1. Place all files in one folder on your Termux device.
 2. Than run these commands:
 ```bash
+pkg install git
+git clone https://github.com/yeki654/Quick-backup
+cd Quick-backup
 chmod 777 install.sh run.sh
 chmod +x install.sh run.sh
 bash install.sh
