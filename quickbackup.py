@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-# QuickBackup Tool — Safe version for Termux
-# No root needed, Base64 + RAR encrypted backup, Internal & External storage
+# QuickBackup Tool — Final Termux Version
+# No root required, encrypted RAR + Base64 backup
+# Internal and External storage support
 
 import os
 import sys
@@ -12,7 +13,6 @@ from colorama import Fore, Style, init
 # Initialize colorama
 init(autoreset=True)
 
-# Default password
 DEFAULT_PASSWORD = "QuickBackup"
 
 # Clear screen
@@ -51,6 +51,29 @@ def progress_bar(duration=2.0, width=30):
         time.sleep(delay)
     print()
 
+# Check command exists
+def shutil_which(cmd):
+    return any(
+        os.access(os.path.join(path, cmd), os.X_OK)
+        for path in os.environ["PATH"].split(os.pathsep)
+    )
+
+# Run terminal command
+def run_cmd(cmd):
+    try:
+        result = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return (result.returncode, result.stdout.strip(), result.stderr.strip())
+    except subprocess.CalledProcessError as e:
+        return (e.returncode, e.stdout.strip() if e.stdout else "", e.stderr.strip() if e.stderr else "")
+
+# Ensure directory exists
+def ensure_dir(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+        return os.access(path, os.W_OK)
+    except Exception:
+        return False
+
 # Find external mounts
 def find_external_mounts():
     mounts = []
@@ -66,9 +89,11 @@ def find_external_mounts():
     for c in common:
         if os.path.exists(c) and os.path.ismount(c) and c not in mounts:
             mounts.append(c)
+    # Keep only writeable
+    mounts = [m for m in mounts if os.access(m, os.W_OK)]
     return mounts
 
-# Select storage
+# Select storage path
 def select_storage(purpose="backup"):
     print(Fore.YELLOW + f"Select storage for {purpose}:")
     print(Fore.YELLOW + "1) Internal Storage (Termux safe path)")
@@ -83,32 +108,21 @@ def select_storage(purpose="backup"):
     elif choice.isdigit() and int(choice) >= 3 and externals:
         return externals[int(choice)-3]
     else:
-        # Default safe internal storage
+        # Default internal safe
         termux_shared = os.path.expanduser("~/storage/shared/QuickBackup")
-        os.makedirs(termux_shared, exist_ok=True)
-        return termux_shared
+        if ensure_dir(termux_shared):
+            return termux_shared
+        else:
+            print(Fore.RED + "[!] Cannot write to internal storage. Using Home (~).")
+            return os.path.expanduser("~")
 
-# Ensure directory exists
-def ensure_dir(path):
+# Ask password securely
+def ask_password(prompt):
     try:
-        os.makedirs(path, exist_ok=True)
+        import getpass
+        return getpass.getpass(prompt)
     except Exception:
-        pass
-
-# Run terminal command
-def run_cmd(cmd):
-    try:
-        result = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return (result.returncode, result.stdout.strip(), result.stderr.strip())
-    except subprocess.CalledProcessError as e:
-        return (e.returncode, e.stdout.strip() if e.stdout else "", e.stderr.strip() if e.stderr else "")
-
-# Check if command exists
-def shutil_which(cmd):
-    return any(
-        os.access(os.path.join(path, cmd), os.X_OK)
-        for path in os.environ["PATH"].split(os.pathsep)
-    )
+        return input(prompt)
 
 # Create RAR with password
 def create_rar_with_password(src_path, out_rar, password):
@@ -119,11 +133,11 @@ def create_rar_with_password(src_path, out_rar, password):
         return False
     if shutil_which("rar"):
         cmd = f'rar a -r -p"{password}" "{out_rar}" "{src_path}"'
-        code, out, err = run_cmd(cmd)
+        code, _, _ = run_cmd(cmd)
         return code == 0
     elif shutil_which("7z"):
         cmd = f'7z a -t7z -p"{password}" -mhe=on "{out_rar}" "{src_path}"'
-        code, out, err = run_cmd(cmd)
+        code, _, _ = run_cmd(cmd)
         return code == 0
     else:
         print(Fore.RED + "[!] No RAR or 7z command found.")
@@ -159,23 +173,15 @@ def extract_rar_with_password(rar_file, dest, password):
     ensure_dir(dest)
     if shutil_which("unrar"):
         cmd = f'unrar x -y -p"{password}" "{rar_file}" "{dest}"'
-        code, out, err = run_cmd(cmd)
+        code, _, _ = run_cmd(cmd)
         return code == 0
     elif shutil_which("7z"):
         cmd = f'7z x -y -p"{password}" "{rar_file}" -o"{dest}"'
-        code, out, err = run_cmd(cmd)
+        code, _, _ = run_cmd(cmd)
         return code == 0
     else:
         print(Fore.RED + "[!] No unrar or 7z command found.")
         return False
-
-# Ask password
-def ask_password(prompt):
-    try:
-        import getpass
-        return getpass.getpass(prompt)
-    except Exception:
-        return input(prompt)
 
 # Backup flow
 def backup_flow():
@@ -242,7 +248,7 @@ def main_menu():
         elif choice == "3":
             break
 
-# Entry
+# Entry point
 if __name__ == "__main__":
     try:
         main_menu()
