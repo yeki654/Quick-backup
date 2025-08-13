@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# QuickBackup Tool — Termux Home + Memory Card (Root Required)
+# QuickBackup Tool — Termux Home + Internal/Memory Card
 # Encrypted RAR + Base64 backup
 
 import os
@@ -13,6 +13,7 @@ from colorama import Fore, init
 init(autoreset=True)
 
 DEFAULT_PASSWORD = "QuickBackup"
+DEFAULT_PATH = os.path.expanduser("~")  # Home Termux as default
 
 # Clear screen
 def clear():
@@ -73,35 +74,53 @@ def ensure_dir(path):
     except Exception:
         return False
 
-# Select storage path (Internal or Memory Card)
+# Select storage path
 def select_storage(purpose="backup"):
     print(Fore.YELLOW + f"Select storage for {purpose}:")
-    print(Fore.YELLOW + "1) Internal Storage (Termux Home Storage)")
-    print(Fore.YELLOW + "2) External Storage (Memory Card) - Root Required")
-    
-    choice = input(Fore.CYAN + "[?] Select option (Enter=default 1): ").strip()
-    
-    home_storage = os.path.expanduser("~/storage")
-    if not os.path.exists(home_storage):
-        os.makedirs(home_storage, exist_ok=True)
-    
-    if choice == "2":
-        # Check root
+    print(Fore.YELLOW + "1) Internal Storage (Root Required)")
+    print(Fore.YELLOW + "2) Memory Card (Root Required)")
+    print(Fore.YELLOW + "3) Home Termux (Default)")
+
+    choice = input(Fore.CYAN + "[?] Select option (Enter=default 3): ").strip()
+
+    internal_path = os.path.expanduser("~/storage")
+    mem_path = "/mnt/media_rw/sdcard"
+    home_path = DEFAULT_PATH
+
+    if choice == "1":
         try:
             if os.geteuid() != 0:
-                print(Fore.RED + "[!] Root is required! If your device is rooted, please report this on GitHub.")
-                return home_storage
+                print(Fore.RED + "[!] You cannot use Internal Storage without root! Using Home Termux instead.")
+                return home_path
         except AttributeError:
-            # Some Android Python builds may not have os.geteuid()
-            print(Fore.RED + "[!] Root check not supported! Using Internal Storage.")
-            return home_storage
+            print(Fore.RED + "[!] Root check not supported! Using Home Termux instead.")
+            return home_path
 
-        mem_path = "/mnt/media_rw/sdcard"  # example memory card path
+        if not os.path.exists(internal_path):
+            os.makedirs(internal_path, exist_ok=True)
+        if not os.access(internal_path, os.W_OK):
+            print(Fore.RED + "[!] Permission denied! Falling back to Home Termux.")
+            return home_path
+        return internal_path
+
+    elif choice == "2":
+        try:
+            if os.geteuid() != 0:
+                print(Fore.RED + "[!] Root is required for Memory Card! Using Home Termux instead.")
+                return home_path
+        except AttributeError:
+            print(Fore.RED + "[!] Root check not supported! Using Home Termux instead.")
+            return home_path
+
         if not os.path.exists(mem_path):
             os.makedirs(mem_path, exist_ok=True)
+        if not os.access(mem_path, os.W_OK):
+            print(Fore.RED + "[!] Permission denied! Falling back to Home Termux.")
+            return home_path
         return mem_path
 
-    return home_storage
+    else:
+        return home_path
 
 # Ask password securely
 def ask_password(prompt):
