@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-# QuickBackup Tool — Final Termux Version
-# No root required, encrypted RAR + Base64 backup
-# Internal and External storage support
+# QuickBackup Tool — Termux Home + Memory Card (Root Required)
+# Encrypted RAR + Base64 backup
 
 import os
 import sys
 import time
 import base64
 import subprocess
-from colorama import Fore, Style, init
+from colorama import Fore, init
 
 # Initialize colorama
 init(autoreset=True)
@@ -74,45 +73,35 @@ def ensure_dir(path):
     except Exception:
         return False
 
-# Find external mounts (writeable only)
-def find_external_mounts():
-    mounts = []
-    storage_dir = "/storage"
-    if os.path.exists(storage_dir):
-        for name in os.listdir(storage_dir):
-            p = os.path.join(storage_dir, name)
-            if name in ("emulated", "self"):
-                continue
-            if os.path.ismount(p) and os.access(p, os.W_OK):
-                mounts.append(p)
-    common = ["/mnt/media_rw", "/mnt/sdcard", "/sdcard"]
-    for c in common:
-        if os.path.exists(c) and os.path.ismount(c) and os.access(c, os.W_OK) and c not in mounts:
-            mounts.append(c)
-    return mounts
-
-# Select storage path safely
+# Select storage path (Internal or Memory Card)
 def select_storage(purpose="backup"):
     print(Fore.YELLOW + f"Select storage for {purpose}:")
-    print(Fore.YELLOW + "1) Internal Storage (Termux safe path)")
-    print(Fore.YELLOW + "2) Termux Home (~)")
-    externals = find_external_mounts()
-    if externals:
-        for idx, path in enumerate(externals, start=3):
-            print(Fore.YELLOW + f"{idx}) External Storage ({path})")
+    print(Fore.YELLOW + "1) Internal Storage (Termux Home Storage)")
+    print(Fore.YELLOW + "2) External Storage (Memory Card) - Root Required")
+    
     choice = input(Fore.CYAN + "[?] Select option (Enter=default 1): ").strip()
+    
+    home_storage = os.path.expanduser("~/storage")
+    if not os.path.exists(home_storage):
+        os.makedirs(home_storage, exist_ok=True)
+    
     if choice == "2":
-        return os.path.expanduser("~")
-    elif choice.isdigit() and int(choice) >= 3 and externals:
-        return externals[int(choice)-3]
-    else:
-        # Default internal safe
-        termux_shared = os.path.expanduser("~/storage/shared/QuickBackup")
-        if ensure_dir(termux_shared):
-            return termux_shared
-        else:
-            print(Fore.RED + "[!] Cannot write to internal storage. Using Home (~).")
-            return os.path.expanduser("~")
+        # Check root
+        try:
+            if os.geteuid() != 0:
+                print(Fore.RED + "[!] Root is required! If your device is rooted, please report this on GitHub.")
+                return home_storage
+        except AttributeError:
+            # Some Android Python builds may not have os.geteuid()
+            print(Fore.RED + "[!] Root check not supported! Using Internal Storage.")
+            return home_storage
+
+        mem_path = "/mnt/media_rw/sdcard"  # example memory card path
+        if not os.path.exists(mem_path):
+            os.makedirs(mem_path, exist_ok=True)
+        return mem_path
+
+    return home_storage
 
 # Ask password securely
 def ask_password(prompt):
@@ -183,15 +172,8 @@ def extract_rar_with_password(rar_file, dest, password):
 
 # Backup flow
 def backup_flow():
-    src = select_storage("backup")
+    src_path = select_storage("backup")
     logo()
-    print(Fore.CYAN + "[*] Backup source path (Enter=Termux default folder):")
-    src_path = input(Fore.CYAN + "> ").strip()
-    if not src_path:
-        src_path = os.path.expanduser("~/storage/shared/QuickBackup")
-    if not ensure_dir(src_path):
-        print(Fore.RED + "[!] Cannot write to selected path. Using Home (~).")
-        src_path = os.path.expanduser("~")
     out_rar = os.path.join(src_path, "backup.rar")
     out_b64 = os.path.join(src_path, "backup.b64")
     pwd = ask_password(Fore.CYAN + "[?] Enter password for RAR (Enter=default): ")
