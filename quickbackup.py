@@ -1,20 +1,33 @@
 #!/usr/bin/env python3
+# QuickBackup Tool — Safe version for Termux
+# No root needed, Base64 + RAR encrypted backup, Internal & External storage
+
 import os
 import sys
 import time
 import base64
 import subprocess
 from colorama import Fore, Style, init
+
+# Initialize colorama
 init(autoreset=True)
+
+# Default password
 DEFAULT_PASSWORD = "QuickBackup"
+
+# Clear screen
 def clear():
     os.system("clear")
+
+# Logo
 def logo():
     clear()
     print(Fore.CYAN + "╔" + "═"*50 + "╗")
     print(Fore.GREEN + "║" + " " * 16 + "🔥 QuickBackup Tool 🔥" + " " * 16 + "║")
     print(Fore.CYAN + "╚" + "═"*50 + "╝")
     print()
+
+# Tiny spinner animation
 def tiny_anim(text, duration=0.9):
     chars = "|/-\\"
     start = time.time()
@@ -25,6 +38,8 @@ def tiny_anim(text, duration=0.9):
         time.sleep(0.08)
         i += 1
     sys.stdout.write("\r" + " " * (len(text) + 2) + "\r")
+
+# Progress bar
 def progress_bar(duration=2.0, width=30):
     steps = width
     delay = duration / steps
@@ -35,6 +50,8 @@ def progress_bar(duration=2.0, width=30):
         print(f"[{filled}{empty}] {pct}%", end="\r")
         time.sleep(delay)
     print()
+
+# Find external mounts
 def find_external_mounts():
     mounts = []
     storage_dir = "/storage"
@@ -50,206 +67,167 @@ def find_external_mounts():
         if os.path.exists(c) and os.path.ismount(c) and c not in mounts:
             mounts.append(c)
     return mounts
+
+# Select storage
 def select_storage(purpose="backup"):
     print(Fore.YELLOW + f"Select storage for {purpose}:")
-    print(Fore.YELLOW + "1) Internal Storage (/sdcard)")
+    print(Fore.YELLOW + "1) Internal Storage (Termux safe path)")
     print(Fore.YELLOW + "2) Termux Home (~)")
     externals = find_external_mounts()
     if externals:
-        print(Fore.YELLOW + "3) External SD Card (detected)")
-    else:
-        print(Fore.YELLOW + "3) External SD Card (not detected)")
-    choice = input(Fore.CYAN + "[?] Enter 1, 2, or 3: ").strip()
-    if choice == "1":
-        return "/sdcard"
-    elif choice == "2":
+        for idx, path in enumerate(externals, start=3):
+            print(Fore.YELLOW + f"{idx}) External Storage ({path})")
+    choice = input(Fore.CYAN + "[?] Select option (Enter=default 1): ").strip()
+    if choice == "2":
         return os.path.expanduser("~")
-    elif choice == "3":
-        if externals:
-            if len(externals) == 1:
-                return externals[0]
-            else:
-                print(Fore.CYAN + "[?] Detected multiple external mounts:")
-                for idx, m in enumerate(externals, 1):
-                    print(Fore.MAGENTA + f"{idx}) {m}")
-                sel = input(Fore.CYAN + "[?] Choose number: ").strip()
-                try:
-                    sel_i = int(sel) - 1
-                    return externals[sel_i]
-                except Exception:
-                    print(Fore.RED + "[!] Invalid selection, defaulting to /sdcard")
-                    return "/sdcard"
-        else:
-            print(Fore.RED + "[!] External SD card not found, defaulting to /sdcard")
-            return "/sdcard"
+    elif choice.isdigit() and int(choice) >= 3 and externals:
+        return externals[int(choice)-3]
     else:
-        print(Fore.RED + "[!] Invalid choice, defaulting to /sdcard")
-        return "/sdcard"
+        # Default safe internal storage
+        termux_shared = os.path.expanduser("~/storage/shared/QuickBackup")
+        os.makedirs(termux_shared, exist_ok=True)
+        return termux_shared
+
+# Ensure directory exists
 def ensure_dir(path):
     try:
         os.makedirs(path, exist_ok=True)
     except Exception:
         pass
+
+# Run terminal command
 def run_cmd(cmd):
     try:
         result = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         return (result.returncode, result.stdout.strip(), result.stderr.strip())
     except subprocess.CalledProcessError as e:
         return (e.returncode, e.stdout.strip() if e.stdout else "", e.stderr.strip() if e.stderr else "")
+
+# Check if command exists
+def shutil_which(cmd):
+    return any(
+        os.access(os.path.join(path, cmd), os.X_OK)
+        for path in os.environ["PATH"].split(os.pathsep)
+    )
+
+# Create RAR with password
 def create_rar_with_password(src_path, out_rar, password):
-    print(Fore.GREEN + "[+] Compressing into RAR with password...")
-    if password is None or password == "":
+    if not password:
         password = DEFAULT_PASSWORD
     if not os.path.exists(src_path):
         print(Fore.RED + f"[!] Source path does not exist: {src_path}")
         return False
     if shutil_which("rar"):
-        cmd = f"rar a -r -p\"{password}\" \"{out_rar}\" \"{src_path}\""
+        cmd = f'rar a -r -p"{password}" "{out_rar}" "{src_path}"'
         code, out, err = run_cmd(cmd)
-        if code == 0:
-            return True
-        else:
-            print(Fore.RED + "[!] RAR creation failed:", err)
-            return False
+        return code == 0
     elif shutil_which("7z"):
-        cmd = f"7z a -t7z -p\"{password}\" -mhe=on \"{out_rar}\" \"{src_path}\""
+        cmd = f'7z a -t7z -p"{password}" -mhe=on "{out_rar}" "{src_path}"'
         code, out, err = run_cmd(cmd)
-        if code == 0:
-            return True
-        else:
-            print(Fore.RED + "[!] 7z creation failed:", err)
-            return False
+        return code == 0
     else:
-        print(Fore.RED + "[!] Neither 'rar' nor '7z' found on system. Please run install.sh to install 'rar' or 'p7zip'.")
+        print(Fore.RED + "[!] No RAR or 7z command found.")
         return False
-def shutil_which(name):
-    from shutil import which
-    return which(name)
+
+# Base64 encode/decode
 def base64_encode_file(src_file, out_b64):
-    print(Fore.GREEN + "[+] Base64-encoding archive...")
     try:
-        with open(src_file, "rb") as f_in, open(out_b64, "wb") as f_out:
-            data = f_in.read()
-            b = base64.b64encode(data)
-            f_out.write(b)
+        with open(src_file, "rb") as f:
+            data = f.read()
+        with open(out_b64, "wb") as f:
+            f.write(base64.b64encode(data))
         return True
     except Exception as e:
-        print(Fore.RED + f"[!] Base64 encoding failed: {e}")
+        print(Fore.RED + f"[!] Encoding error: {e}")
         return False
+
 def base64_decode_file(src_b64, out_file):
-    print(Fore.GREEN + "[+] Decoding base64 to archive...")
     try:
-        with open(src_b64, "rb") as f_in, open(out_file, "wb") as f_out:
-            b = base64.b64decode(f_in.read())
-            f_out.write(b)
+        with open(src_b64, "rb") as f:
+            data = f.read()
+        with open(out_file, "wb") as f:
+            f.write(base64.b64decode(data))
         return True
     except Exception as e:
-        print(Fore.RED + f"[!] Base64 decode failed: {e}")
+        print(Fore.RED + f"[!] Decoding error: {e}")
         return False
+
+# Extract RAR with password
 def extract_rar_with_password(rar_file, dest, password):
-    if password is None or password == "":
+    if not password:
         password = DEFAULT_PASSWORD
-    print(Fore.GREEN + "[+] Extracting archive (this may ask for permission) ...")
+    ensure_dir(dest)
     if shutil_which("unrar"):
-        cmd = f"unrar x -y -p\"{password}\" \"{rar_file}\" \"{dest}\""
+        cmd = f'unrar x -y -p"{password}" "{rar_file}" "{dest}"'
         code, out, err = run_cmd(cmd)
-        if code == 0:
-            return True
-        else:
-            print(Fore.RED + f"[!] unrar failed: {err}")
-            return False
+        return code == 0
     elif shutil_which("7z"):
-        cmd = f"7z x -y -p\"{password}\" \"{rar_file}\" -o\"{dest}\""
+        cmd = f'7z x -y -p"{password}" "{rar_file}" -o"{dest}"'
         code, out, err = run_cmd(cmd)
-        if code == 0:
-            return True
-        else:
-            print(Fore.RED + f"[!] 7z extract failed: {err}")
-            return False
+        return code == 0
     else:
-        print(Fore.RED + "[!] Neither 'unrar' nor '7z' found. Install them via install.sh.")
+        print(Fore.RED + "[!] No unrar or 7z command found.")
         return False
+
+# Ask password
 def ask_password(prompt):
     try:
         import getpass
-        p = getpass.getpass(prompt)
-        return p
+        return getpass.getpass(prompt)
     except Exception:
         return input(prompt)
+
+# Backup flow
 def backup_flow():
     src = select_storage("backup")
-    sub = input(Fore.CYAN + "[?] Enter path or subfolder to backup (enter for root of selected storage): ").strip()
-    if sub:
-        src_path = os.path.join(src, sub) if not os.path.isabs(sub) else sub
-    else:
-        src_path = src
-    if not os.path.exists(src_path):
-        print(Fore.RED + "[!] Path not found: " + src_path)
-        return
-    default_name = f"backup_{time.strftime('%Y%m%d_%H%M%S')}.rar"
-    out_name = input(Fore.CYAN + f"[?] Enter output filename (default: {default_name}): ").strip()
-    if not out_name:
-        out_name = default_name
-    if not out_name.lower().endswith(".rar"):
-        out_name = out_name + ".rar"
-    out_dir = input(Fore.CYAN + "[?] Enter directory to save backup (press enter to save in current dir): ").strip()
-    if out_dir:
-        ensure_dir(out_dir)
-        out_rar = os.path.join(out_dir, out_name)
-    else:
-        out_rar = os.path.abspath(out_name)
-    pwd = ask_password(Fore.CYAN + "[?] Enter password for RAR (leave empty for default): ")
+    logo()
+    print(Fore.CYAN + "[*] Backup source path (Enter=Termux default folder):")
+    src_path = input(Fore.CYAN + "> ").strip()
+    if not src_path:
+        src_path = os.path.expanduser("~/storage/shared/QuickBackup")
+    ensure_dir(src_path)
+    out_rar = os.path.join(src_path, "backup.rar")
+    out_b64 = os.path.join(src_path, "backup.b64")
+    pwd = ask_password(Fore.CYAN + "[?] Enter password for RAR (Enter=default): ")
     if not pwd:
         pwd = DEFAULT_PASSWORD
         print(Fore.YELLOW + f"[!] Using default password: {pwd}")
-    print(Fore.GREEN + "[+] Starting backup...")
-    tiny_anim("Preparing...", 0.8)
-    progress_bar(1.0)
-    ok = create_rar_with_password(src_path, out_rar, pwd)
-    if not ok:
-        print(Fore.RED + "[!] Archive creation failed.")
-        return
-    out_b64 = out_rar + ".b64"
-    ok2 = base64_encode_file(out_rar, out_b64)
-    if ok2:
-        try:
+    tiny_anim("Creating RAR...")
+    if create_rar_with_password(src_path, out_rar, pwd):
+        progress_bar()
+        print(Fore.GREEN + "[✔] RAR created.")
+        tiny_anim("Encoding Base64...")
+        if base64_encode_file(out_rar, out_b64):
+            progress_bar()
             os.remove(out_rar)
-        except Exception:
-            pass
-        print(Fore.GREEN + f"[✓] Backup complete: {out_b64}")
+            print(Fore.GREEN + f"[✔] Backup completed: {out_b64}")
     else:
-        print(Fore.RED + "[!] Backup encoding failed.")
+        print(Fore.RED + "[!] Backup failed.")
+
+# Restore flow
 def restore_flow():
-    src = select_storage("restore")
+    dest = select_storage("restore")
+    logo()
     b64_path = input(Fore.CYAN + "[?] Enter path to .b64 backup file: ").strip()
     if not os.path.exists(b64_path):
-        print(Fore.RED + "[!] File not found: " + b64_path)
+        print(Fore.RED + "[!] File not found.")
         return
-    tmp_rar = os.path.join("/data/data", "tmp_quickbackup_restore.rar")
-    if os.path.exists(tmp_rar):
-        try:
+    tmp_rar = os.path.join(os.path.expanduser("~"), "tmp_quickbackup_restore.rar")
+    if base64_decode_file(b64_path, tmp_rar):
+        pwd = ask_password(Fore.CYAN + "[?] Enter password for RAR (Enter=default): ")
+        if not pwd:
+            pwd = DEFAULT_PASSWORD
+        tiny_anim("Extracting RAR...")
+        if extract_rar_with_password(tmp_rar, dest, pwd):
+            progress_bar()
             os.remove(tmp_rar)
-        except Exception:
-            pass
-    ok = base64_decode_file(b64_path, tmp_rar)
-    if not ok:
-        print(Fore.RED + "[!] Failed to decode backup.")
-        return
-    pwd = ask_password(Fore.CYAN + "[?] Enter password for RAR (leave empty for default): ")
-    if not pwd:
-        pwd = DEFAULT_PASSWORD
-        print(Fore.YELLOW + f"[!] Using default password: {pwd}")
-    ensure_dir(src)
-    progress_bar(1.5)
-    ok2 = extract_rar_with_password(tmp_rar, src, pwd)
-    try:
-        os.remove(tmp_rar)
-    except Exception:
-        pass
-    if ok2:
-        print(Fore.GREEN + f"[✓] Restore complete to: {src}")
+            print(Fore.GREEN + f"[✔] Restore completed to: {dest}")
+        else:
+            print(Fore.RED + "[!] Restore failed.")
     else:
-        print(Fore.RED + "[!] Restore failed. Check password and archive.")
+        print(Fore.RED + "[!] Base64 decoding failed.")
+
+# Main menu
 def main_menu():
     while True:
         logo()
@@ -259,16 +237,12 @@ def main_menu():
         choice = input(Fore.CYAN + "[?] Select option: ").strip()
         if choice == "1":
             backup_flow()
-            input(Fore.CYAN + "\nPress Enter to return to menu...")
         elif choice == "2":
             restore_flow()
-            input(Fore.CYAN + "\nPress Enter to return to menu...")
         elif choice == "3":
-            print(Fore.CYAN + "Exiting... ⚡")
             break
-        else:
-            print(Fore.RED + "[!] Invalid option.")
-            time.sleep(0.6)
+
+# Entry
 if __name__ == "__main__":
     try:
         main_menu()
