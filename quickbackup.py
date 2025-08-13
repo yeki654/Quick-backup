@@ -66,7 +66,7 @@ def run_cmd(cmd):
     except subprocess.CalledProcessError as e:
         return (e.returncode, e.stdout.strip() if e.stdout else "", e.stderr.strip() if e.stderr else "")
 
-# Ensure directory exists
+# Ensure directory exists and writeable
 def ensure_dir(path):
     try:
         os.makedirs(path, exist_ok=True)
@@ -74,7 +74,7 @@ def ensure_dir(path):
     except Exception:
         return False
 
-# Find external mounts
+# Find external mounts (writeable only)
 def find_external_mounts():
     mounts = []
     storage_dir = "/storage"
@@ -83,17 +83,15 @@ def find_external_mounts():
             p = os.path.join(storage_dir, name)
             if name in ("emulated", "self"):
                 continue
-            if os.path.ismount(p):
+            if os.path.ismount(p) and os.access(p, os.W_OK):
                 mounts.append(p)
     common = ["/mnt/media_rw", "/mnt/sdcard", "/sdcard"]
     for c in common:
-        if os.path.exists(c) and os.path.ismount(c) and c not in mounts:
+        if os.path.exists(c) and os.path.ismount(c) and os.access(c, os.W_OK) and c not in mounts:
             mounts.append(c)
-    # Keep only writeable
-    mounts = [m for m in mounts if os.access(m, os.W_OK)]
     return mounts
 
-# Select storage path
+# Select storage path safely
 def select_storage(purpose="backup"):
     print(Fore.YELLOW + f"Select storage for {purpose}:")
     print(Fore.YELLOW + "1) Internal Storage (Termux safe path)")
@@ -191,7 +189,9 @@ def backup_flow():
     src_path = input(Fore.CYAN + "> ").strip()
     if not src_path:
         src_path = os.path.expanduser("~/storage/shared/QuickBackup")
-    ensure_dir(src_path)
+    if not ensure_dir(src_path):
+        print(Fore.RED + "[!] Cannot write to selected path. Using Home (~).")
+        src_path = os.path.expanduser("~")
     out_rar = os.path.join(src_path, "backup.rar")
     out_b64 = os.path.join(src_path, "backup.b64")
     pwd = ask_password(Fore.CYAN + "[?] Enter password for RAR (Enter=default): ")
