@@ -8,6 +8,7 @@ QuickBackup is a lightweight **Termux** backup tool for Android that:
   - Internal Storage (`/sdcard`)
   - Termux Home (`~`)
   - External SD Card (if detected)
+- No root required
 
 > ⚠️ If no password is provided at backup/restore, a default password `QuickBackup` is used.
 
@@ -36,4 +37,5 @@ chmod 777 install.sh run.sh
 chmod +x install.sh run.sh
 bash install.sh
 bash run.sh
+
 
