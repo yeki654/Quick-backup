@@ -7,4 +7,5 @@ echo "================================="
 echo "      🚀 QuickBackup Runner 🚀"
 echo "================================="
 echo -e "${RESET}"
+sleep 3
 python3 quickbackup.py
